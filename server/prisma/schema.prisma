@@ -1,0 +1,95 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoomStatus {
+  LOBBY
+  IN_GAME
+  FINISHED
+}
+
+enum Role {
+  CREWMATE
+  IMPOSTOR
+}
+
+enum GameWinner {
+  CREWMATES
+  IMPOSTOR
+}
+
+enum GameResult {
+  WON
+  LOST
+}
+
+model User {
+  id             String            @id @default(cuid())
+  username       String            @unique
+  email          String            @unique
+  passwordHash   String
+  avatar         String?
+  refreshTokens  RefreshToken[]
+  hostedRooms    Room[]            @relation("RoomHost")
+  playerStats    PlayerGameStats[]
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  tokenHash String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Room {
+  id        String     @id @default(cuid())
+  roomCode  String     @unique
+  hostId    String
+  host      User       @relation("RoomHost", fields: [hostId], references: [id])
+  settings  Json
+  status    RoomStatus @default(LOBBY)
+  game      Game?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model Game {
+  id          String            @id @default(cuid())
+  roomId      String            @unique
+  room        Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  winner      GameWinner?
+  impostorId  String?
+  moveHistory Json
+  voteHistory Json
+  stats       PlayerGameStats[]
+  createdAt   DateTime          @default(now())
+  endedAt     DateTime?
+}
+
+model PlayerGameStats {
+  id          String     @id @default(cuid())
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gameId      String
+  game        Game       @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  role        Role
+  result      GameResult
+  movesPlayed Int        @default(0)
+  captures    Int        @default(0)
+  blunders    Int        @default(0)
+  mistakes    Int        @default(0)
+  accuracy    Float      @default(0)
+
+  @@unique([userId, gameId])
+}
