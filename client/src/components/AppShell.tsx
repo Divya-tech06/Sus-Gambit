@@ -1,4 +1,4 @@
-import { Home, LogOut, Plus, Search, Settings, Trophy, User } from "lucide-react";
+import { Home, LogOut, Plus, Search, Trophy, User } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../store/auth";
 
@@ -7,8 +7,7 @@ const links = [
   { to: "/create", label: "Create Room", icon: Plus },
   { to: "/join", label: "Join Room", icon: Search },
   { to: "/profile", label: "Profile", icon: User },
-  { to: "/leaderboards", label: "Leaderboards", icon: Trophy },
-  { to: "/settings", label: "Settings", icon: Settings }
+  { to: "/leaderboards", label: "Leaderboards", icon: Trophy }
 ];
 
 export function AppShell() {

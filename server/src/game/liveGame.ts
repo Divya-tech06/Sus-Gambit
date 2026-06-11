@@ -208,7 +208,12 @@ export class LiveGameService {
     const room = this.requireRoom(roomCode);
     this.assertCanMove(room, userId);
 
-    const legalMove = room.chess.move({ from: move.from, to: move.to, promotion: move.promotion ?? "q" });
+    let legalMove;
+    try {
+      legalMove = room.chess.move({ from: move.from, to: move.to, promotion: move.promotion ?? "q" });
+    } catch (e) {
+      throw new Error("Illegal move.");
+    }
     if (!legalMove) throw new Error("Illegal move.");
 
     this.recordMove(room, legalMove, "WHITE", userId);
@@ -239,6 +244,20 @@ export class LiveGameService {
     return message;
   }
 
+  private sendSystemMessage(room: LiveRoom, body: string) {
+    const message: ChatMessage = {
+      id: nanoid(),
+      roomCode: room.roomCode,
+      userId: "system",
+      username: "System",
+      body,
+      createdAt: new Date().toISOString(),
+      system: true
+    };
+    room.chat.push(message);
+    this.broadcast(room.roomCode, "receive-message", message);
+  }
+
   callMeeting(roomCode: string, userId: string) {
     const room = this.requireRoom(roomCode);
     const player = this.requirePlayer(room, userId);
@@ -251,6 +270,7 @@ export class LiveGameService {
     room.meeting.phaseEndsAt = Date.now() + room.settings.discussionTimer * 1000;
     room.meeting.votes = [];
     this.setMeetingTimer(room, () => this.startVoting(room));
+    this.sendSystemMessage(room, `${player.username} called an emergency meeting!`);
     this.broadcastUpdate(room);
     return this.gameSnapshot(room);
   }
@@ -326,8 +346,12 @@ export class LiveGameService {
     if (await this.checkGameEnd(room)) return;
     const botMove = await chooseBotMove(room.chess, room.settings.botDifficulty);
     if (botMove) {
-      const move = room.chess.move({ from: botMove.from, to: botMove.to, promotion: botMove.promotion });
-      if (move) this.recordMove(room, move, "BLACK");
+      try {
+        const move = room.chess.move({ from: botMove.from, to: botMove.to, promotion: botMove.promotion });
+        if (move) this.recordMove(room, move, "BLACK");
+      } catch (e) {
+        console.error("Bot tried to play an illegal move:", botMove, e);
+      }
     }
     if (await this.checkGameEnd(room)) return;
     this.advanceTurn(room);
@@ -376,19 +400,28 @@ export class LiveGameService {
   private async finishVoting(room: LiveRoom) {
     if (room.meeting.phase !== "VOTING") return;
     this.clearMeetingTimer(room);
-    const alive = this.alivePlayers(room);
     const counts = new Map<string | "SKIP", number>();
     for (const vote of room.meeting.votes) counts.set(vote.targetId, (counts.get(vote.targetId) ?? 0) + 1);
     const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
     const top = sorted[0];
     const tied = sorted.length > 1 && sorted[0]?.[1] === sorted[1]?.[1];
-    const majority = top && top[1] > alive.length / 2;
-    const eliminatedUserId = top && top[0] !== "SKIP" && majority && !tied ? top[0] : null;
+    
+    // Eject if top is not SKIP and there is no tie for first place
+    const eliminatedUserId = top && top[0] !== "SKIP" && !tied ? top[0] : null;
 
     if (eliminatedUserId) {
       const eliminated = this.requirePlayer(room, eliminatedUserId);
       eliminated.alive = false;
+      this.sendSystemMessage(room, `${eliminated.username} was voted out (ejected).`);
       this.broadcast(room.roomCode, "player-eliminated", { userId: eliminatedUserId });
+    } else {
+      if (top && top[0] === "SKIP") {
+        this.sendSystemMessage(room, "Voting skipped. No one was ejected.");
+      } else if (tied) {
+        this.sendSystemMessage(room, "Tie vote. No one was ejected.");
+      } else {
+        this.sendSystemMessage(room, "No votes were cast. No one was ejected.");
+      }
     }
 
     room.voteHistory.push([...room.meeting.votes]);
@@ -489,8 +522,8 @@ export class LiveGameService {
 
   private startTurnTimer(room: LiveRoom) {
     this.clearTurnTimer(room);
-    if (room.status !== "IN_GAME" || room.meeting.phase !== "NONE") return;
-    room.timers.turn = setTimeout(() => void this.autoMove(room), 30_000);
+    // Disable turn timer to prevent auto moves for white
+    return;
   }
 
   private clearTurnTimer(room: LiveRoom) {

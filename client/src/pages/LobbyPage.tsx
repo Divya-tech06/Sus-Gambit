@@ -24,7 +24,7 @@ export function LobbyPage() {
       <Panel title={room?.settings.roomName ?? "Lobby"}>
         <div className="mb-5 flex flex-wrap items-center gap-3 text-sm text-zinc-300">
           <span className="rounded-md border border-white/10 px-3 py-1 font-mono text-neon">{roomCode}</span>
-          <span>{room?.settings.botDifficulty ?? "EASY"} bot</span>
+          <span>{room?.settings.botDifficulty ?? 1500} ELO bot</span>
           <span>{room?.settings.meetingCooldown ?? 5} move meeting cooldown</span>
         </div>
         {error && <p className="mb-4 rounded-md border border-ember/40 bg-ember/10 px-3 py-2 text-sm text-rose-200">{error}</p>}

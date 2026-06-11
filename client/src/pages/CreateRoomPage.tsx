@@ -18,7 +18,7 @@ export function CreateRoomPage() {
     const settings: RoomSettings = {
       roomName: String(form.get("roomName")),
       playerCount: Number(form.get("playerCount")) as RoomSettings["playerCount"],
-      botDifficulty: String(form.get("botDifficulty")) as RoomSettings["botDifficulty"],
+      botDifficulty: Number(form.get("botDifficulty")) as unknown as RoomSettings["botDifficulty"],
       meetingCooldown: Number(form.get("meetingCooldown")) as RoomSettings["meetingCooldown"],
       votingTimer: Number(form.get("votingTimer")) as RoomSettings["votingTimer"],
       discussionTimer: Number(form.get("discussionTimer")) as RoomSettings["discussionTimer"],
@@ -45,9 +45,11 @@ export function CreateRoomPage() {
           ))}
         </SelectField>
         <SelectField label="Bot Difficulty" name="botDifficulty" defaultValue={DEFAULT_ROOM_SETTINGS.botDifficulty}>
-          <option value="BEGINNER">Beginner</option>
-          <option value="EASY">Easy</option>
-          <option value="MEDIUM">Medium</option>
+          {[1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 2400, 2500, 2600, 2700].map((rating) => (
+            <option key={rating} value={rating}>
+              {rating} ELO
+            </option>
+          ))}
         </SelectField>
         <SelectField label="Meeting Cooldown" name="meetingCooldown" defaultValue={DEFAULT_ROOM_SETTINGS.meetingCooldown}>
           <option value="5">Every 5 White Moves</option>

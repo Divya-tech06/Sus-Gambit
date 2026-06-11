@@ -11,6 +11,7 @@ export function useRoomSocket(roomCode: string | undefined) {
   const setGame = useGameStore((state) => state.setGame);
   const setRole = useGameStore((state) => state.setRole);
   const setError = useGameStore((state) => state.setError);
+  const pushChat = useGameStore((state) => state.pushChat);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -25,6 +26,7 @@ export function useRoomSocket(roomCode: string | undefined) {
     socket.on("role-assigned", setRole);
     socket.on("error-message", setError);
     socket.on("game-over", setGame);
+    socket.on("receive-message", pushChat);
 
     socket.emit("join-room", { roomCode }, (response) => {
       if (response.ok) {
@@ -53,6 +55,7 @@ export function useRoomSocket(roomCode: string | undefined) {
       socket.off("role-assigned", setRole);
       socket.off("error-message", setError);
       socket.off("game-over", setGame);
+      socket.off("receive-message", pushChat);
     };
-  }, [navigate, roomCode, setError, setGame, setRole, setRoom, token]);
+  }, [navigate, roomCode, setError, setGame, setRole, setRoom, token, pushChat]);
 }

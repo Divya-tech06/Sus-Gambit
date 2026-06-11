@@ -1,7 +1,7 @@
 export type Role = "CREWMATE" | "IMPOSTOR";
 export type RoomStatus = "LOBBY" | "IN_GAME" | "FINISHED";
 export type RoomVisibility = "PUBLIC" | "PRIVATE";
-export type BotDifficulty = "BEGINNER" | "EASY" | "MEDIUM";
+export type BotDifficulty = 1300 | 1400 | 1500 | 1600 | 1700 | 1800 | 1900 | 2000 | 2100 | 2200 | 2300 | 2400 | 2500 | 2600 | 2700;
 export type MeetingPhase = "NONE" | "DISCUSSION" | "VOTING" | "RESULTS";
 export type GameWinner = "CREWMATES" | "IMPOSTOR" | null;
 
@@ -131,7 +131,7 @@ export type Ack<T> = (response: { ok: true; data: T } | { ok: false; error: stri
 export const DEFAULT_ROOM_SETTINGS: RoomSettings = {
   roomName: "Suspicious Sicilian",
   playerCount: 5,
-  botDifficulty: "EASY",
+  botDifficulty: 1500,
   meetingCooldown: 5,
   votingTimer: 60,
   discussionTimer: 60,

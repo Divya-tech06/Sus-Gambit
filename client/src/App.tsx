@@ -9,7 +9,6 @@ import { JoinRoomPage } from "./pages/JoinRoomPage";
 import { LeaderboardsPage } from "./pages/LeaderboardsPage";
 import { LobbyPage } from "./pages/LobbyPage";
 import { ProfilePage } from "./pages/ProfilePage";
-import { SettingsPage } from "./pages/SettingsPage";
 
 export function App() {
   return (
@@ -31,7 +30,6 @@ export function App() {
         <Route path="game/:roomCode" element={<GamePage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="leaderboards" element={<LeaderboardsPage />} />
-        <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

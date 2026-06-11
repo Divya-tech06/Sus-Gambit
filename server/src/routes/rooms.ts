@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { RoomSettings } from "@chess-impostor/shared";
 import type { LiveGameService } from "../game/liveGame.js";
 import { requireAuth } from "../middleware/auth.js";
 import { createRoomSchema } from "../validators.js";
@@ -17,9 +18,10 @@ export function roomsRouter(liveGames: LiveGameService) {
       return;
     }
 
-    const room = await liveGames.createRoom(req.user!, parsed.data);
+    const room = await liveGames.createRoom(req.user!, parsed.data as unknown as RoomSettings);
     res.status(201).json(room);
   });
 
   return router;
 }
+
