@@ -56,7 +56,9 @@ interface LiveRoom {
   timers: {
     turn: NodeJS.Timeout | null;
     meeting: NodeJS.Timeout | null;
+    hostGrace: NodeJS.Timeout | null;
   };
+  turnEndsAt: number | null;
 }
 
 export type Broadcast = (roomCode: string, event: string, payload: unknown) => void;
@@ -65,6 +67,8 @@ export type DirectEmit = (userId: string, event: string, payload: unknown) => vo
 export class LiveGameService {
   private rooms = new Map<string, LiveRoom>();
   private socketToUser = new Map<string, string>();
+  /** Track which room each user is currently "active" in (to prevent dual-room joins) */
+  private userToRoom = new Map<string, string>();
 
   constructor(
     private readonly broadcast: Broadcast,
@@ -72,6 +76,9 @@ export class LiveGameService {
   ) {}
 
   async createRoom(host: { id: string; username: string; avatar: string | null }, settings: RoomSettings) {
+    // If the host is already in a room, remove them from it first
+    this.removeUserFromCurrentRoom(host.id);
+
     const roomCode = nanoid(6).toUpperCase();
     const room = await prisma.room.create({
       data: { roomCode, hostId: host.id, settings: settings as unknown as Prisma.InputJsonValue, status: "LOBBY" }
@@ -80,6 +87,7 @@ export class LiveGameService {
     const liveRoom = this.makeRoom(room.id, roomCode, host.id, settings);
     liveRoom.players.set(host.id, this.makePlayer(host, true, null));
     this.rooms.set(roomCode, liveRoom);
+    this.userToRoom.set(host.id, roomCode);
     return this.roomSnapshot(liveRoom);
   }
 
@@ -104,48 +112,152 @@ export class LiveGameService {
       player.connected = false;
       player.socketId = null;
       player.disconnectedAt = Date.now();
+
+      // If the disconnected player is the host, start a grace period then reassign
+      if (room.hostId === userId) {
+        this.scheduleHostReassignment(room, userId);
+      }
+
       this.broadcastUpdate(room);
+    }
+  }
+
+  /** Immediately or after grace period, reassign host to another player */
+  private scheduleHostReassignment(room: LiveRoom, oldHostId: string) {
+    // Clear any existing grace timer
+    if (room.timers.hostGrace) clearTimeout(room.timers.hostGrace);
+
+    room.timers.hostGrace = setTimeout(() => {
+      room.timers.hostGrace = null;
+      // Only reassign if the old host is still disconnected
+      const oldHost = room.players.get(oldHostId);
+      if (oldHost && !oldHost.connected) {
+        this.reassignHost(room, oldHostId);
+      }
+    }, 15_000); // 15 second grace window
+  }
+
+  private reassignHost(room: LiveRoom, excludeId: string) {
+    // Find the next connected (or any alive) player
+    for (const [id, player] of room.players) {
+      if (id !== excludeId && (player.connected || player.alive)) {
+        room.hostId = id;
+        this.sendSystemMessage(room, `${player.username} is now the host.`);
+        this.broadcastUpdate(room);
+        return;
+      }
+    }
+    // No suitable host → just pick any remaining player
+    for (const [id] of room.players) {
+      if (id !== excludeId) {
+        room.hostId = id;
+        this.broadcastUpdate(room);
+        return;
+      }
     }
   }
 
   joinRoom(roomCode: string, user: { id: string; username: string; avatar: string | null }, socketId: string) {
     const room = this.requireRoom(roomCode);
-    if (room.status !== "LOBBY") throw new Error("Game already started.");
-    if (!room.players.has(user.id) && room.players.size >= room.settings.playerCount) {
-      throw new Error("Room is full.");
-    }
 
+    // Fast-path: player is already in the room (reconnect / duplicate join)
     const existing = room.players.get(user.id);
     if (existing) {
       existing.connected = true;
       existing.socketId = socketId;
       existing.disconnectedAt = null;
-    } else {
-      room.players.set(user.id, this.makePlayer(user, false, socketId));
+
+      // Cancel host grace timer if host reconnected
+      if (room.hostId === user.id && room.timers.hostGrace) {
+        clearTimeout(room.timers.hostGrace);
+        room.timers.hostGrace = null;
+      }
+
+      this.userToRoom.set(user.id, roomCode);
+      this.broadcastUpdate(room);
+      // Return appropriate snapshot
+      return room.status === "LOBBY" ? this.roomSnapshot(room) : this.gameSnapshot(room);
     }
+
+    // New player joining
+    if (room.status !== "LOBBY") throw new Error("Game already started.");
+    if (room.players.size >= room.settings.playerCount) throw new Error("Room is full.");
+
+    // Prevent joining a second room
+    const currentRoom = this.userToRoom.get(user.id);
+    if (currentRoom && currentRoom !== roomCode) {
+      throw new Error("You are already in another room. Please leave it first.");
+    }
+
+    room.players.set(user.id, this.makePlayer(user, false, socketId));
+    this.userToRoom.set(user.id, roomCode);
     this.broadcastUpdate(room);
     return this.roomSnapshot(room);
   }
 
-  leaveRoom(roomCode: string, userId: string) {
+  leaveRoom(roomCode: string, userId: string): void {
     const room = this.requireRoom(roomCode);
     if (room.status === "IN_GAME") {
-      const player = room.players.get(userId);
-      if (player) {
-        player.connected = false;
-        player.socketId = null;
-        player.disconnectedAt = Date.now();
-      }
-      this.broadcastUpdate(room);
-      return;
+      // During a game, use leaveGame instead
+      return this.leaveGame(roomCode, userId);
     }
 
     room.players.delete(userId);
+    this.userToRoom.delete(userId);
+
+    if (room.players.size === 0) {
+      // Empty room – clean up
+      this.rooms.delete(roomCode);
+      return;
+    }
+
     if (room.hostId === userId) {
       const nextHost = room.players.keys().next().value as string | undefined;
-      if (nextHost) room.hostId = nextHost;
+      if (nextHost) {
+        room.hostId = nextHost;
+        const nextPlayer = room.players.get(nextHost);
+        if (nextPlayer) this.sendSystemMessage(room, `${nextPlayer.username} is now the host.`);
+      }
     }
     this.broadcastUpdate(room);
+  }
+
+  /**
+   * In-game leave:
+   * - Impostor leaves → Crewmates win immediately
+   * - Crewmate leaves → they are marked dead and removed
+   */
+  leaveGame(roomCode: string, userId: string): void {
+    const room = this.requireRoom(roomCode);
+    if (room.status !== "IN_GAME") {
+      // If not in game, treat as lobby leave
+      return this.leaveRoom(roomCode, userId);
+    }
+
+    const player = room.players.get(userId);
+    if (!player) return;
+
+    if (player.role === "IMPOSTOR") {
+      // Impostor left → crewmates win
+      player.alive = false;
+      player.connected = false;
+      this.sendSystemMessage(room, `${player.username} (Impostor) left the game. Crewmates win!`);
+      void this.checkGameEnd(room);
+    } else {
+      // Crewmate left → mark dead
+      player.alive = false;
+      player.connected = false;
+      this.userToRoom.delete(userId);
+      this.sendSystemMessage(room, `${player.username} left the game.`);
+
+      // Reassign host if needed
+      if (room.hostId === userId) {
+        this.reassignHost(room, userId);
+      }
+
+      void this.checkGameEnd(room);
+      this.broadcastUpdate(room);
+    }
   }
 
   setReady(roomCode: string, userId: string, ready: boolean) {
@@ -172,6 +284,7 @@ export class LiveGameService {
     room.voteHistory = [];
     room.chat = [];
     room.winner = null;
+    room.turnEndsAt = null;
     room.meeting = {
       phase: "NONE",
       calledById: null,
@@ -294,10 +407,31 @@ export class LiveGameService {
 
   snapshot(roomCode: string, userId: string) {
     const room = this.requireRoom(roomCode);
-    const player = this.requirePlayer(room, userId);
-    player.connected = true;
-    player.disconnectedAt = null;
+    const player = room.players.get(userId);
+    if (player) {
+      player.connected = true;
+      player.disconnectedAt = null;
+    }
+    this.userToRoom.set(userId, roomCode);
     return room.status === "LOBBY" ? this.roomSnapshot(room) : this.gameSnapshot(room);
+  }
+
+  private removeUserFromCurrentRoom(userId: string) {
+    const currentRoomCode = this.userToRoom.get(userId);
+    if (!currentRoomCode) return;
+    const room = this.rooms.get(currentRoomCode);
+    if (!room || room.status !== "LOBBY") return;
+    room.players.delete(userId);
+    this.userToRoom.delete(userId);
+    if (room.players.size === 0) {
+      this.rooms.delete(currentRoomCode);
+      return;
+    }
+    if (room.hostId === userId) {
+      const nextHost = room.players.keys().next().value as string | undefined;
+      if (nextHost) room.hostId = nextHost;
+    }
+    this.broadcastUpdate(room);
   }
 
   private makeRoom(id: string, roomCode: string, hostId: string, settings: RoomSettings): LiveRoom {
@@ -317,7 +451,8 @@ export class LiveGameService {
       meeting: { phase: "NONE", calledById: null, phaseEndsAt: null, votes: [], whiteMovesSinceMeeting: 0 },
       gameId: null,
       winner: null,
-      timers: { turn: null, meeting: null }
+      turnEndsAt: null,
+      timers: { turn: null, meeting: null, hostGrace: null }
     };
   }
 
@@ -347,7 +482,7 @@ export class LiveGameService {
     const botMove = await chooseBotMove(room.chess, room.settings.botDifficulty);
     if (botMove) {
       try {
-        const move = room.chess.move({ from: botMove.from, to: botMove.to, promotion: botMove.promotion });
+        const move = room.chess.move({ from: botMove.from, to: botMove.to, promotion: botMove.promotion ?? "q" });
         if (move) this.recordMove(room, move, "BLACK");
       } catch (e) {
         console.error("Bot tried to play an illegal move:", botMove, e);
@@ -405,8 +540,7 @@ export class LiveGameService {
     const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
     const top = sorted[0];
     const tied = sorted.length > 1 && sorted[0]?.[1] === sorted[1]?.[1];
-    
-    // Eject if top is not SKIP and there is no tie for first place
+
     const eliminatedUserId = top && top[0] !== "SKIP" && !tied ? top[0] : null;
 
     if (eliminatedUserId) {
@@ -480,13 +614,62 @@ export class LiveGameService {
           }
         }
       });
-      await prisma.room.update({ where: { id: room.id }, data: { status: "FINISHED" } });
     }
 
     const snapshot = this.gameSnapshot(room);
     this.broadcast(room.roomCode, "game-over", snapshot);
-    this.broadcastUpdate(room);
+
+    // ── Auto-reset to lobby after 10 seconds ─────────────────────────────────
+    setTimeout(() => {
+      this.resetRoomToLobby(room);
+    }, 10_000);
+
     return true;
+  }
+
+  /** Reset a finished room back to LOBBY so all players can play again */
+  private async resetRoomToLobby(room: LiveRoom) {
+    if (room.status !== "FINISHED") return;
+
+    room.status = "LOBBY";
+    room.chess = new Chess();
+    room.moveHistory = [];
+    room.voteHistory = [];
+    room.chat = [];
+    room.winner = null;
+    room.gameId = null;
+    room.turnOrder = [];
+    room.currentTurnIndex = 0;
+    room.turnEndsAt = null;
+    room.meeting = { phase: "NONE", calledById: null, phaseEndsAt: null, votes: [], whiteMovesSinceMeeting: 0 };
+
+    // Reset player state; remove players who disconnected during the game
+    for (const [id, player] of room.players) {
+      if (!player.connected) {
+        room.players.delete(id);
+        this.userToRoom.delete(id);
+      } else {
+        player.alive = true;
+        player.role = null;
+        player.ready = false;
+        player.movesPlayed = 0;
+        player.captures = 0;
+        player.disconnectedAt = null;
+      }
+    }
+
+    // Ensure host is still a valid player
+    if (!room.players.has(room.hostId)) {
+      const first = room.players.keys().next().value as string | undefined;
+      if (first) room.hostId = first;
+    }
+
+    try {
+      await prisma.room.update({ where: { id: room.id }, data: { status: "LOBBY" } });
+    } catch { /* room may have been deleted */ }
+
+    // Send room-updated so clients navigate back to lobby
+    this.broadcast(room.roomCode, "room-updated", this.roomSnapshot(room));
   }
 
   private assertCanMove(room: LiveRoom, userId: string) {
@@ -522,13 +705,19 @@ export class LiveGameService {
 
   private startTurnTimer(room: LiveRoom) {
     this.clearTurnTimer(room);
-    // Disable turn timer to prevent auto moves for white
-    return;
+    const seconds = (room.settings as any).turnTimer ?? 30;
+    room.turnEndsAt = Date.now() + seconds * 1000;
+    room.timers.turn = setTimeout(() => {
+      void this.autoMove(room);
+    }, seconds * 1000);
+    // Broadcast immediately so clients see the new turnEndsAt
+    this.broadcastUpdate(room);
   }
 
   private clearTurnTimer(room: LiveRoom) {
     if (room.timers.turn) clearTimeout(room.timers.turn);
     room.timers.turn = null;
+    room.turnEndsAt = null;
   }
 
   private setMeetingTimer(room: LiveRoom, callback: () => void) {
@@ -574,6 +763,7 @@ export class LiveGameService {
     return {
       roomCode: room.roomCode,
       roomName: room.settings.roomName,
+      hostId: room.hostId,
       status: room.status,
       fen: room.chess.fen(),
       players: Array.from(room.players.values()).map((player) => ({
@@ -586,7 +776,7 @@ export class LiveGameService {
         movesPlayed: player.movesPlayed
       })),
       currentPlayerId,
-      turnEndsAt: room.timers.turn ? new Date(Date.now() + 30_000).toISOString() : null,
+      turnEndsAt: room.turnEndsAt ? new Date(room.turnEndsAt).toISOString() : null,
       moveHistory: room.moveHistory,
       chat: room.chat,
       meeting: {
@@ -603,7 +793,11 @@ export class LiveGameService {
   }
 
   private broadcastUpdate(room: LiveRoom) {
-    this.broadcast(room.roomCode, room.status === "LOBBY" ? "room-updated" : "game-updated", room.status === "LOBBY" ? this.roomSnapshot(room) : this.gameSnapshot(room));
+    this.broadcast(
+      room.roomCode,
+      room.status === "LOBBY" ? "room-updated" : "game-updated",
+      room.status === "LOBBY" ? this.roomSnapshot(room) : this.gameSnapshot(room)
+    );
   }
 
   private requireRoom(roomCode: string) {

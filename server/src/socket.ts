@@ -62,6 +62,13 @@ export function registerSockets(io: GameServer, liveGames: LiveGameService) {
       });
     });
 
+    socket.on("leave-game", ({ roomCode }, ack) => {
+      handle(socket, ack, () => {
+        socket.leave(roomCode.toUpperCase());
+        return liveGames.leaveGame(roomCode, user.id);
+      });
+    });
+
     socket.on("player-ready", ({ roomCode, ready }, ack) => {
       handle(socket, ack, () => liveGames.setReady(roomCode, user.id, ready));
     });

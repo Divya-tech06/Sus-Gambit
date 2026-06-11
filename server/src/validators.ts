@@ -36,5 +36,6 @@ export const createRoomSchema = z.object({
   meetingCooldown: z.union([z.literal(5), z.literal(7), z.literal(10)]),
   votingTimer: z.union([z.literal(30), z.literal(60), z.literal(90)]),
   discussionTimer: z.union([z.literal(30), z.literal(60), z.literal(120)]),
+  turnTimer: z.union([z.literal(30), z.literal(60), z.literal(90)]).optional().default(30),
   visibility: z.enum(["PUBLIC", "PRIVATE"])
 });

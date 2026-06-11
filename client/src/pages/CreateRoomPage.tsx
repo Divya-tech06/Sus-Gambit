@@ -22,6 +22,7 @@ export function CreateRoomPage() {
       meetingCooldown: Number(form.get("meetingCooldown")) as RoomSettings["meetingCooldown"],
       votingTimer: Number(form.get("votingTimer")) as RoomSettings["votingTimer"],
       discussionTimer: Number(form.get("discussionTimer")) as RoomSettings["discussionTimer"],
+      turnTimer: Number(form.get("turnTimer")) as RoomSettings["turnTimer"],
       visibility: String(form.get("visibility")) as RoomSettings["visibility"]
     };
     try {
@@ -65,6 +66,11 @@ export function CreateRoomPage() {
           <option value="30">30 seconds</option>
           <option value="60">60 seconds</option>
           <option value="120">120 seconds</option>
+        </SelectField>
+        <SelectField label="Turn Timer" name="turnTimer" defaultValue={DEFAULT_ROOM_SETTINGS.turnTimer}>
+          <option value="30">30 seconds</option>
+          <option value="60">60 seconds</option>
+          <option value="90">90 seconds</option>
         </SelectField>
         <SelectField label="Visibility" name="visibility" defaultValue={DEFAULT_ROOM_SETTINGS.visibility}>
           <option value="PUBLIC">Public</option>

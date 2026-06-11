@@ -12,6 +12,7 @@ export interface RoomSettings {
   meetingCooldown: 5 | 7 | 10;
   votingTimer: 30 | 60 | 90;
   discussionTimer: 30 | 60 | 120;
+  turnTimer: 30 | 60 | 90;
   visibility: RoomVisibility;
 }
 
@@ -71,6 +72,7 @@ export interface RoomSnapshot {
 export interface GameSnapshot {
   roomCode: string;
   roomName: string;
+  hostId: string;
   status: RoomStatus;
   fen: string;
   players: GamePlayer[];
@@ -115,8 +117,9 @@ export interface ServerToClientEvents {
 }
 
 export interface ClientToServerEvents {
-  "join-room": (payload: { roomCode: string }, ack?: Ack<RoomSnapshot>) => void;
+  "join-room": (payload: { roomCode: string }, ack?: Ack<RoomSnapshot | GameSnapshot>) => void;
   "leave-room": (payload: { roomCode: string }, ack?: Ack<void>) => void;
+  "leave-game": (payload: { roomCode: string }, ack?: Ack<void>) => void;
   "player-ready": (payload: { roomCode: string; ready: boolean }, ack?: Ack<RoomSnapshot>) => void;
   "start-game": (payload: { roomCode: string }, ack?: Ack<GameSnapshot>) => void;
   "make-move": (payload: { roomCode: string; from: string; to: string; promotion?: string }, ack?: Ack<GameSnapshot>) => void;
@@ -135,5 +138,6 @@ export const DEFAULT_ROOM_SETTINGS: RoomSettings = {
   meetingCooldown: 5,
   votingTimer: 60,
   discussionTimer: 60,
+  turnTimer: 30,
   visibility: "PUBLIC"
 };
