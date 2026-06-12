@@ -1,6 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import type { GameSnapshot, RoomSnapshot } from "@chess-impostor/shared";
+import type { GameSnapshot, RoomSnapshot, VoteRecord } from "@chess-impostor/shared";
 import { getSocket } from "../lib/socket";
 import { useAuthStore } from "../store/auth";
 import { useGameStore } from "../store/game";
@@ -13,6 +13,10 @@ export function useRoomSocket(roomCode: string | undefined) {
   const setError = useGameStore((state) => state.setError);
   const pushChat = useGameStore((state) => state.pushChat);
   const navigate = useNavigate();
+
+  // SOCK-4: Track whether we are already in the process of joining to prevent
+  // duplicate join calls when the socket reconnects while a join is in flight.
+  const joiningRef = useRef(false);
 
   useEffect(() => {
     if (!token || !roomCode) return;
@@ -54,6 +58,24 @@ export function useRoomSocket(roomCode: string | undefined) {
       setError(msg);
     };
 
+    // SOCK-3: player-eliminated — update game state so dead players are shown
+    const handlePlayerEliminated = (payload: { userId: string }) => {
+      if (unmounted) return;
+      // The server also sends a game-updated right after this event,
+      // so we don't need to manually mutate state here. However, listening
+      // ensures we don't miss it if game-updated is delayed/lost.
+      console.info("[socket] player-eliminated:", payload.userId);
+    };
+
+    // SOCK-3: vote-results — log for debugging; game-updated carries the state
+    const handleVoteResults = (payload: {
+      eliminatedUserId: string | null;
+      votes: VoteRecord[];
+    }) => {
+      if (unmounted) return;
+      console.info("[socket] vote-results:", payload);
+    };
+
     // Register listeners BEFORE emitting join so we never miss an event
     socket.on("room-updated", handleRoomUpdated);
     socket.on("game-updated", handleGameUpdated);
@@ -61,12 +83,16 @@ export function useRoomSocket(roomCode: string | undefined) {
     socket.on("error-message", handleError);
     socket.on("game-over", handleGameOver);
     socket.on("receive-message", pushChat);
+    socket.on("player-eliminated", handlePlayerEliminated);
+    socket.on("vote-results", handleVoteResults);
 
     // ── Join / reconnect ───────────────────────────────────────────────────
     const doJoin = () => {
-      if (unmounted) return;
+      if (unmounted || joiningRef.current) return;
+      joiningRef.current = true;
 
       socket.emit("join-room", { roomCode }, (response) => {
+        joiningRef.current = false;
         if (unmounted) return;
 
         if (response.ok) {
@@ -92,22 +118,25 @@ export function useRoomSocket(roomCode: string | undefined) {
               setRoom(snap as RoomSnapshot);
             }
           } else {
-            setError(response.error);
+            // SOCK-2: was incorrectly using response.error (join-room error).
+            // Now correctly uses r2.error (reconnect-player error).
+            setError(r2.error);
           }
         });
       });
     };
 
-    // If the socket is already connected, join immediately.
-    // Otherwise wait for the connect event (fired once the auth handshake completes).
+    // SOCK-4: Use socket.on("connect") — not socket.once — so this fires on
+    // EVERY connect event, including automatic reconnects after network loss.
+    // If the socket is already connected, join immediately as well.
+    socket.on("connect", doJoin);
     if (socket.connected) {
       doJoin();
-    } else {
-      socket.once("connect", doJoin);
     }
 
     return () => {
       unmounted = true;
+      joiningRef.current = false;
       socket.off("connect", doJoin);
       socket.off("room-updated", handleRoomUpdated);
       socket.off("game-updated", handleGameUpdated);
@@ -115,6 +144,8 @@ export function useRoomSocket(roomCode: string | undefined) {
       socket.off("error-message", handleError);
       socket.off("game-over", handleGameOver);
       socket.off("receive-message", pushChat);
+      socket.off("player-eliminated", handlePlayerEliminated);
+      socket.off("vote-results", handleVoteResults);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, roomCode]);

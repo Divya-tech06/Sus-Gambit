@@ -1,7 +1,18 @@
 import type { AuthPayload, RoomSettings, RoomSnapshot } from "@chess-impostor/shared";
 import { useAuthStore } from "../store/auth";
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+// DOMAIN-1: VITE_API_BASE is required in production.
+// In dev it falls back to localhost; in production it must be explicitly set.
+const API_BASE =
+  import.meta.env.VITE_API_BASE ??
+  (import.meta.env.DEV ? "http://localhost:4000" : undefined);
+
+if (!API_BASE) {
+  throw new Error(
+    "[api] VITE_API_BASE is not set. " +
+      "Add it to your .env.local (dev) or deployment environment (prod)."
+  );
+}
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = useAuthStore.getState().accessToken;

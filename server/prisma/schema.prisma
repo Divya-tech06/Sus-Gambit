@@ -43,6 +43,7 @@ model User {
 
 model RefreshToken {
   id        String   @id @default(cuid())
+  jti       String?  @unique   // JWT ID for O(1) token lookup on refresh
   tokenHash String
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -50,6 +51,7 @@ model RefreshToken {
   createdAt DateTime @default(now())
 
   @@index([userId])
+  @@index([expiresAt])          // efficient cleanup of expired tokens
 }
 
 model Room {

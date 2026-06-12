@@ -9,7 +9,10 @@ import { loginSchema, profileSchema, signupSchema } from "../validators.js";
 
 export const authRouter = Router();
 
-async function authPayload(userId: string, rememberMe = false) {
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Build user data with lifetime stats. No tokens created. */
+async function userPayload(userId: string) {
   const user = await prisma.user.findUniqueOrThrow({
     where: { id: userId },
     select: {
@@ -21,34 +24,63 @@ async function authPayload(userId: string, rememberMe = false) {
     }
   });
 
-  const publicUser = { id: user.id, username: user.username, email: user.email, avatar: user.avatar };
+  const stats = user.playerStats as Array<{ result: GameResult; role: Role }>;
+  const wins = stats.filter((s) => s.result === "WON");
+  return {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    avatar: user.avatar,
+    gamesPlayed: stats.length,
+    gamesWon: wins.length,
+    gamesLost: stats.length - wins.length,
+    impostorWins: wins.filter((s) => s.role === "IMPOSTOR").length,
+    crewmateWins: wins.filter((s) => s.role === "CREWMATE").length
+  };
+}
+
+/**
+ * Issue a brand-new access + refresh token pair and persist the refresh token.
+ * Only called from login, signup, and the refresh endpoint.
+ * Prunes expired tokens for the user as a side-effect.
+ */
+async function createTokenPair(userId: string, rememberMe = false) {
+  const user = await prisma.user.findUniqueOrThrow({
+    where: { id: userId },
+    select: { id: true, username: true, email: true, avatar: true }
+  });
+
+  const publicUser = {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    avatar: user.avatar
+  };
+
   const accessToken = signAccessToken(publicUser);
   const refreshToken = signRefreshToken(publicUser, rememberMe);
   const decoded = verifyRefreshToken(refreshToken);
 
+  // Persist the new refresh token with its jti for O(1) future lookups
   await prisma.refreshToken.create({
     data: {
+      jti: decoded.jti,
       tokenHash: await bcrypt.hash(refreshToken, 12),
       userId: user.id,
       expiresAt: new Date(decoded.exp * 1000)
     }
   });
 
-  const stats = user.playerStats as Array<{ result: GameResult; role: Role }>;
-  const wins = stats.filter((stat) => stat.result === "WON");
-  return {
-    accessToken,
-    refreshToken,
-    user: {
-      ...publicUser,
-      gamesPlayed: stats.length,
-      gamesWon: wins.length,
-      gamesLost: stats.length - wins.length,
-      impostorWins: wins.filter((stat) => stat.role === "IMPOSTOR").length,
-      crewmateWins: wins.filter((stat) => stat.role === "CREWMATE").length
-    }
-  };
+  // Non-critical housekeeping: delete expired tokens for this user
+  prisma.refreshToken
+    .deleteMany({ where: { userId: user.id, expiresAt: { lt: new Date() } } })
+    .catch(() => { /* silent — housekeeping is not critical */ });
+
+  const userData = await userPayload(userId);
+  return { accessToken, refreshToken, user: userData };
 }
+
+// ── Routes ────────────────────────────────────────────────────────────────────
 
 authRouter.post("/signup", async (req, res) => {
   const parsed = signupSchema.safeParse(req.body);
@@ -71,7 +103,7 @@ authRouter.post("/signup", async (req, res) => {
   const user = await prisma.user.create({
     data: { username, email, passwordHash: await hashPassword(password) }
   });
-  res.status(201).json(await authPayload(user.id, true));
+  res.status(201).json(await createTokenPair(user.id, true));
 });
 
 authRouter.post("/login", async (req, res) => {
@@ -87,32 +119,69 @@ authRouter.post("/login", async (req, res) => {
     return;
   }
 
-  res.json(await authPayload(user.id, parsed.data.rememberMe));
+  res.json(await createTokenPair(user.id, parsed.data.rememberMe));
 });
 
 authRouter.post("/refresh", async (req, res) => {
   const refreshToken = String(req.body.refreshToken ?? "");
   try {
     const decoded = verifyRefreshToken(refreshToken);
-    const tokens = await prisma.refreshToken.findMany({ where: { userId: decoded.sub } });
-    const match = await Promise.all(
-      (tokens as Array<{ tokenHash: string }>).map((token) => bcrypt.compare(refreshToken, token.tokenHash))
-    );
-    if (!match.some(Boolean)) {
+
+    let matched = false;
+
+    if (decoded.jti) {
+      // ── Fast path (new tokens): O(1) lookup by jti ──────────────────────
+      const record = await prisma.refreshToken.findUnique({
+        where: { jti: decoded.jti }
+      });
+      if (record && record.userId === decoded.sub && record.expiresAt > new Date()) {
+        matched = await bcrypt.compare(refreshToken, record.tokenHash);
+      }
+    } else {
+      // ── Legacy path (tokens without jti): bounded scan ──────────────────
+      // Cap at 20 to prevent DoS. Old tokens will expire naturally.
+      const records = await prisma.refreshToken.findMany({
+        where: { userId: decoded.sub, expiresAt: { gt: new Date() }, jti: null },
+        take: 20
+      });
+      const comparisons = await Promise.all(
+        records.map((r) => bcrypt.compare(refreshToken, r.tokenHash))
+      );
+      matched = comparisons.some(Boolean);
+    }
+
+    if (!matched) {
       res.status(401).json({ error: "Refresh token not recognized." });
       return;
     }
 
-    res.json(await authPayload(decoded.sub, true));
+    res.json(await createTokenPair(decoded.sub, true));
   } catch {
     res.status(401).json({ error: "Invalid refresh token." });
   }
 });
 
+/**
+ * GET /auth/me — returns the current user + a fresh access token.
+ * Does NOT create a new refresh token (DB-5 fix).
+ * The client should preserve its existing refresh token.
+ */
 authRouter.get("/me", requireAuth, async (req, res) => {
-  res.json(await authPayload(req.user!.id, true));
+  const user = await userPayload(req.user!.id);
+  const accessToken = signAccessToken({
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    avatar: user.avatar
+  });
+  // refreshToken is empty string so the client preserves its existing one
+  res.json({ accessToken, refreshToken: "", user });
 });
 
+/**
+ * PATCH /auth/profile — updates profile, returns fresh access token.
+ * Does NOT create a new refresh token (DB-5 fix).
+ */
 authRouter.patch("/profile", requireAuth, async (req, res) => {
   const parsed = profileSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -121,5 +190,12 @@ authRouter.patch("/profile", requireAuth, async (req, res) => {
   }
 
   await prisma.user.update({ where: { id: req.user!.id }, data: parsed.data });
-  res.json(await authPayload(req.user!.id, true));
+  const user = await userPayload(req.user!.id);
+  const accessToken = signAccessToken({
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    avatar: user.avatar
+  });
+  res.json({ accessToken, refreshToken: "", user });
 });

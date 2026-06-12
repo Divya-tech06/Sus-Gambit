@@ -20,7 +20,13 @@ export const useAuthStore = create<AuthState>()(
       refreshToken: null,
       user: null,
       setAuth: (payload) =>
-        set({ accessToken: payload.accessToken, refreshToken: payload.refreshToken, user: payload.user }),
+        set((state) => ({
+          accessToken: payload.accessToken,
+          // DB-5: /auth/me and /auth/profile return refreshToken: "" to avoid
+          // creating a new DB row on every page load. Preserve the stored token.
+          refreshToken: payload.refreshToken || state.refreshToken,
+          user: payload.user
+        })),
       logout: () => {
         closeSocket();
         set({ accessToken: null, refreshToken: null, user: null });

@@ -106,20 +106,25 @@ export class LiveGameService {
     this.socketToUser.delete(socketId);
     if (!userId) return;
 
-    for (const room of this.rooms.values()) {
-      const player = room.players.get(userId);
-      if (!player) continue;
-      player.connected = false;
-      player.socketId = null;
-      player.disconnectedAt = Date.now();
+    // SOCK-5: O(1) lookup via userToRoom instead of scanning all rooms
+    const roomCode = this.userToRoom.get(userId);
+    if (!roomCode) return;
+    const room = this.rooms.get(roomCode);
+    if (!room) return;
 
-      // If the disconnected player is the host, start a grace period then reassign
-      if (room.hostId === userId) {
-        this.scheduleHostReassignment(room, userId);
-      }
+    const player = room.players.get(userId);
+    if (!player) return;
 
-      this.broadcastUpdate(room);
+    player.connected = false;
+    player.socketId = null;
+    player.disconnectedAt = Date.now();
+
+    // If the disconnected player is the host, start a grace period then reassign
+    if (room.hostId === userId) {
+      this.scheduleHostReassignment(room, userId);
     }
+
+    this.broadcastUpdate(room);
   }
 
   /** Immediately or after grace period, reassign host to another player */
@@ -276,6 +281,10 @@ export class LiveGameService {
       throw new Error("All players must be ready.");
     }
 
+    // DB-2: Set status to IN_GAME BEFORE any await to act as an optimistic lock.
+    // Node.js is single-threaded so this prevents two concurrent start-game events
+    // from both passing the status check before either writes to the DB.
+    if (room.status === "IN_GAME") throw new Error("Game already started.");
     room.status = "IN_GAME";
     room.turnOrder = this.shuffle(Array.from(room.players.keys()));
     room.currentTurnIndex = 0;
@@ -353,6 +362,8 @@ export class LiveGameService {
       createdAt: new Date().toISOString()
     };
     room.chat.push(message);
+    // REL-2: Cap chat history to prevent unbounded memory growth and large broadcast payloads
+    if (room.chat.length > 200) room.chat = room.chat.slice(-200);
     this.broadcast(room.roomCode, "receive-message", message);
     return message;
   }
@@ -368,6 +379,8 @@ export class LiveGameService {
       system: true
     };
     room.chat.push(message);
+    // REL-2: Cap chat history
+    if (room.chat.length > 200) room.chat = room.chat.slice(-200);
     this.broadcast(room.roomCode, "receive-message", message);
   }
 
@@ -480,6 +493,11 @@ export class LiveGameService {
     this.clearTurnTimer(room);
     if (await this.checkGameEnd(room)) return;
     const botMove = await chooseBotMove(room.chess, room.settings.botDifficulty);
+
+    // REL-1: Guard — the game may have ended while the bot was thinking (up to 4s).
+    // Do not apply a move to a finished or reset game.
+    if (room.status !== "IN_GAME") return;
+
     if (botMove) {
       try {
         const move = room.chess.move({ from: botMove.from, to: botMove.to, promotion: botMove.promotion ?? "q" });
@@ -620,8 +638,11 @@ export class LiveGameService {
     this.broadcast(room.roomCode, "game-over", snapshot);
 
     // ── Auto-reset to lobby after 10 seconds ─────────────────────────────────
+    // DB-3: resetRoomToLobby is async; catch errors to prevent unhandled rejection
     setTimeout(() => {
-      this.resetRoomToLobby(room);
+      this.resetRoomToLobby(room).catch((err) =>
+        console.error("[liveGame] resetRoomToLobby failed:", err)
+      );
     }, 10_000);
 
     return true;
@@ -710,8 +731,9 @@ export class LiveGameService {
     room.timers.turn = setTimeout(() => {
       void this.autoMove(room);
     }, seconds * 1000);
-    // Broadcast immediately so clients see the new turnEndsAt
-    this.broadcastUpdate(room);
+    // REL-3: Removed broadcastUpdate from here — every caller already calls
+    // broadcastUpdate after startTurnTimer, so this was a duplicate broadcast.
+    // Callers: afterWhiteMove, finishVoting, startGame — all call broadcastUpdate.
   }
 
   private clearTurnTimer(room: LiveRoom) {
