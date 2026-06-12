@@ -2,26 +2,11 @@ import { Chess } from "chess.js";
 import type { BotDifficulty } from "@chess-impostor/shared";
 import stockfish from "stockfish";
 
-/**
- * ─── Stockfish Singleton ──────────────────────────────────────────────────────
- *
- * Rules:
- *  1. ONE engine instance for the server lifetime.
- *  2. Engine is initialised lazily on the first call.
- *  3. If an init is already in-flight we wait for the same promise.
- *  4. ALL output from the engine goes through one stable `engine.print` handler
- *     set at init time — we never replace it inside chooseBotMove.
- *  5. chooseBotMove is serialised: a second call waits until the first finishes.
- */
-
 let engine: any = null;
-/** Promise that resolves when the engine has completed the UCI handshake. */
 let initPromise: Promise<any> | null = null;
 
-/** The resolver for the currently pending bestmove search. */
 let bestmoveResolve: ((move: string | null) => void) | null = null;
 
-/** Serialisation: next call waits for the current search to complete. */
 let searchQueue: Promise<any> = Promise.resolve();
 
 function initEngine(): Promise<any> {
@@ -30,37 +15,64 @@ function initEngine(): Promise<any> {
   initPromise = (async () => {
     const eng = await stockfish();
 
-    // Silence debug noise
-    eng.printErr = () => {};
+    eng.printErr = () => { };
 
-    // ONE stable print handler — set once, never replaced
-    eng.print = (line: string) => {
+    // ──────────────────────────────────────────────────────────────────────
+    // FIX: The stockfish npm WASM build routes ALL output through
+    //      `eng.listener`, NOT through `eng.print`.
+    //
+    //      eng.print is a wrapper:  function(e){ c.listener ? c.listener(e) : console.log(e) }
+    //      where `c` IS `eng` itself.  Overwriting `eng.print` replaces only
+    //      that wrapper on the object; the internal Emscripten code still calls
+    //      `c.listener` (i.e. `eng.listener`) directly.
+    //
+    //      Setting `eng.print` after the engine resolves has no effect on where
+    //      output is delivered — `uciok` / `readyok` / `bestmove` lines are
+    //      never seen by the overwritten handler, so initEngine() hangs forever.
+    //
+    //      The correct property to set is `eng.listener`.
+    // ──────────────────────────────────────────────────────────────────────
+
+    // Install the permanent bestmove listener first.
+    eng.listener = (line: string) => {
       if (line.startsWith("bestmove")) {
         if (bestmoveResolve) {
           const parts = line.split(" ");
           const moveStr = parts[1] ?? null;
           const cb = bestmoveResolve;
-          bestmoveResolve = null;          // consume before calling to avoid re-entry
+          bestmoveResolve = null;      // consume before calling to avoid re-entry
           cb(moveStr === "(none)" ? null : moveStr);
         }
       }
     };
 
-    // UCI handshake: uci → (wait for uciok) → isready → (wait for readyok)
-    await new Promise<void>((resolve) => {
-      const origPrint = eng.print;
-      eng.print = (line: string) => {
-        origPrint(line);
+    // Run the UCI handshake: uci → uciok → isready → readyok
+    await new Promise<void>((resolve, reject) => {
+      // 10-second guard so initEngine() can never hang indefinitely.
+      const initTimeout = setTimeout(() => {
+        reject(new Error("[bot] Stockfish init timed out waiting for readyok"));
+      }, 10_000);
+
+      const permanentListener = eng.listener;
+
+      eng.listener = (line: string) => {
+        console.log("[SF]", line);
+
         if (line === "uciok") {
-          // Restore the stable handler, then send isready
-          eng.print = origPrint;
+          console.log("[bot] got uciok – sending isready");
           eng.sendCommand("isready");
         }
+
         if (line === "readyok") {
-          eng.print = origPrint;
+          console.log("[bot] got readyok – engine ready");
+          clearTimeout(initTimeout);
+          // Restore the permanent bestmove listener before resolving so
+          // no bestmove lines are missed during the transition.
+          eng.listener = permanentListener;
           resolve();
         }
       };
+
       eng.sendCommand("uci");
     });
 
@@ -68,7 +80,6 @@ function initEngine(): Promise<any> {
     return eng;
   })();
 
-  // If init fails, reset so the next call retries
   initPromise.catch(() => {
     initPromise = null;
     engine = null;
@@ -77,7 +88,6 @@ function initEngine(): Promise<any> {
   return initPromise;
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function chooseBotMove(
   chess: Chess,
@@ -90,9 +100,7 @@ export async function chooseBotMove(
     return { from: m.from, to: m.to, promotion: m.promotion };
   }
 
-  // Serialise: wait for any in-flight search before starting ours
   const myTurn = searchQueue.then(() => runSearch(chess, difficulty, randomMove));
-  // Advance the queue — even if myTurn throws, the chain must continue
   searchQueue = myTurn.catch(() => undefined);
   return myTurn;
 }
@@ -102,7 +110,6 @@ async function runSearch(
   difficulty: BotDifficulty,
   randomMove: () => { from: string; to: string; promotion?: string } | null
 ): Promise<{ from: string; to: string; promotion?: string } | null> {
-  // 4-second hard cap — fall back to random if engine hangs
   const TIMEOUT_MS = 4000;
   const moveTimeMs = Math.max(100, Math.min(800, (difficulty - 1300) * 25));
 
@@ -152,7 +159,6 @@ async function runSearch(
       done = true;
       bestmoveResolve = null;
       console.error("[bot] sendCommand error:", err);
-      // Blow away the engine so next call re-inits
       engine = null;
       initPromise = null;
       resolve(randomMove());
