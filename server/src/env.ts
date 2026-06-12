@@ -1,12 +1,11 @@
 import "dotenv/config";
 
-/** Throw if a required env var is missing in production */
 function required(name: string): string {
   const value = process.env[name];
   if (!value) {
     throw new Error(
       `[env] Missing required environment variable: ${name}. ` +
-        `Check your .env file or deployment configuration.`
+      `Check your .env file or deployment configuration.`
     );
   }
   return value;
