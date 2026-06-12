@@ -9,14 +9,12 @@ let currentToken: string | null = null;
 // DOMAIN-1/2: VITE_SOCKET_URL is required in production.
 // Set it in your .env.local (dev) or deployment environment (prod).
 // There is intentionally no localhost fallback to catch misconfiguration early.
-const SOCKET_URL =
-  import.meta.env.VITE_SOCKET_URL ??
-  (import.meta.env.DEV ? "http://localhost:4000" : undefined);
+const SOCKET_URL = "https://sus-gambit-lgx1.onrender.com";
 
 if (!SOCKET_URL) {
   throw new Error(
     "[socket] VITE_SOCKET_URL is not set. " +
-      "Add it to your .env.local (dev) or deployment environment (prod)."
+    "Add it to your .env.local (dev) or deployment environment (prod)."
   );
 }
 

@@ -3,14 +3,12 @@ import { useAuthStore } from "../store/auth";
 
 // DOMAIN-1: VITE_API_BASE is required in production.
 // In dev it falls back to localhost; in production it must be explicitly set.
-const API_BASE =
-  import.meta.env.VITE_API_BASE ??
-  (import.meta.env.DEV ? "http://localhost:4000" : undefined);
+const API_BASE = "https://sus-gambit-lgx1.onrender.com";
 
 if (!API_BASE) {
   throw new Error(
     "[api] VITE_API_BASE is not set. " +
-      "Add it to your .env.local (dev) or deployment environment (prod)."
+    "Add it to your .env.local (dev) or deployment environment (prod)."
   );
 }
 
