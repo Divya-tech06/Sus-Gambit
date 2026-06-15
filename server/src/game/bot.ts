@@ -13,7 +13,7 @@ function initEngine(): Promise<any> {
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
-    const eng = await stockfish();
+    const eng = await (stockfish as any)("lite-single");
 
     eng.printErr = () => { };
 
