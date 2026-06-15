@@ -80,6 +80,14 @@ export function registerSockets(io: GameServer, liveGames: LiveGameService) {
       });
     });
 
+    socket.on("disband-room", ({ roomCode }, ack) => {
+      handle(socket, ack, () => {
+        const code = validateRoomCode(roomCode);
+        socket.leave(code);
+        return liveGames.disbandRoom(code, user.id);
+      });
+    });
+
     socket.on("leave-game", ({ roomCode }, ack) => {
       handle(socket, ack, () => {
         const code = validateRoomCode(roomCode);

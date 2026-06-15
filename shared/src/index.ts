@@ -113,10 +113,12 @@ export interface ServerToClientEvents {
   "vote-results": (payload: { eliminatedUserId: string | null; votes: VoteRecord[] }) => void;
   "player-eliminated": (payload: { userId: string }) => void;
   "game-over": (game: GameSnapshot) => void;
+  "room-disbanded": () => void;
   "error-message": (message: string) => void;
 }
 
 export interface ClientToServerEvents {
+  "disband-room": (payload: { roomCode: string }, ack?: Ack<void>) => void;
   "join-room": (payload: { roomCode: string }, ack?: Ack<RoomSnapshot | GameSnapshot>) => void;
   "leave-room": (payload: { roomCode: string }, ack?: Ack<void>) => void;
   "leave-game": (payload: { roomCode: string }, ack?: Ack<void>) => void;

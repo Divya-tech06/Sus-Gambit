@@ -227,6 +227,40 @@ export class LiveGameService {
     this.broadcastUpdate(room);
   }
 
+  async disbandRoom(roomCode: string, userId: string): Promise<void> {
+    const room = this.requireRoom(roomCode);
+    if (room.hostId !== userId) {
+      throw new Error("Only the host can disband the room.");
+    }
+
+    // 1. Notify all players in the room
+    this.broadcast(room.roomCode, "room-disbanded", undefined);
+
+    // 2. Clean up timers
+    this.clearTurnTimer(room);
+    this.clearMeetingTimer(room);
+    if (room.timers.hostGrace) {
+      clearTimeout(room.timers.hostGrace);
+    }
+
+    // 3. Clear user mapping
+    for (const player of room.players.values()) {
+      this.userToRoom.delete(player.id);
+    }
+
+    // 4. Remove from active rooms Map
+    this.rooms.delete(roomCode);
+
+    // 5. Delete from DB
+    try {
+      await prisma.room.delete({
+        where: { id: room.id }
+      });
+    } catch (err) {
+      console.error("[liveGame] Failed to delete room from DB on disband:", err);
+    }
+  }
+
   /**
    * In-game leave:
    * - Impostor leaves → Crewmates win immediately

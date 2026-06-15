@@ -1,4 +1,4 @@
-import { Crown, LogOut, Play, UserCheck } from "lucide-react";
+import { Crown, LogOut, Play, UserCheck, Trash2 } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "../components/Button";
 import { Panel } from "../components/Panel";
@@ -25,6 +25,15 @@ export function LobbyPage() {
     socket.emit("leave-room", { roomCode: roomCode! }, () => {
       setRoom(null);
       navigate("/", { replace: true });
+    });
+  }
+
+  function handleDisband() {
+    socket.emit("disband-room", { roomCode: roomCode! }, (res) => {
+      if (res?.ok) {
+        setRoom(null);
+        navigate("/", { replace: true });
+      }
     });
   }
 
@@ -112,6 +121,17 @@ export function LobbyPage() {
             <LogOut size={17} />
             Leave Lobby
           </button>
+
+          {/* Remove Room (host only) */}
+          {isHost && (
+            <button
+              className="inline-flex items-center justify-center gap-2 rounded-md border border-red-700/50 bg-red-950/20 px-4 py-2 text-sm text-red-300 hover:bg-red-950/40 transition-colors font-semibold"
+              onClick={handleDisband}
+            >
+              <Trash2 size={17} />
+              Remove Room
+            </button>
+          )}
         </div>
 
         {/* Waiting status */}

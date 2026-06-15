@@ -76,6 +76,14 @@ export function useRoomSocket(roomCode: string | undefined) {
       console.info("[socket] vote-results:", payload);
     };
 
+    const handleRoomDisbanded = () => {
+      if (unmounted) return;
+      setRoom(null);
+      setGame(null);
+      setError("The room was disbanded by the host.");
+      navigate("/", { replace: true });
+    };
+
     // Register listeners BEFORE emitting join so we never miss an event
     socket.on("room-updated", handleRoomUpdated);
     socket.on("game-updated", handleGameUpdated);
@@ -85,6 +93,7 @@ export function useRoomSocket(roomCode: string | undefined) {
     socket.on("receive-message", pushChat);
     socket.on("player-eliminated", handlePlayerEliminated);
     socket.on("vote-results", handleVoteResults);
+    socket.on("room-disbanded", handleRoomDisbanded);
 
     // ── Join / reconnect ───────────────────────────────────────────────────
     const doJoin = () => {
@@ -146,6 +155,7 @@ export function useRoomSocket(roomCode: string | undefined) {
       socket.off("receive-message", pushChat);
       socket.off("player-eliminated", handlePlayerEliminated);
       socket.off("vote-results", handleVoteResults);
+      socket.off("room-disbanded", handleRoomDisbanded);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, roomCode]);
