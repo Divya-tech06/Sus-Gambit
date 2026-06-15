@@ -45,6 +45,7 @@ export function LobbyPage() {
       <Panel title={room?.settings.roomName ?? "Lobby"}>
         <div className="mb-5 flex flex-wrap items-center gap-3 text-sm text-zinc-300">
           <span className="rounded-md border border-white/10 px-3 py-1 font-mono text-neon">{roomCode}</span>
+          <span>{room?.settings.impostorCount ?? 1} impostor{room?.settings.impostorCount && room.settings.impostorCount > 1 ? "s" : ""}</span>
           <span>{room?.settings.botDifficulty ?? 1500} ELO bot</span>
           <span>{room?.settings.meetingCooldown ?? 5} move cooldown</span>
           <span>{room?.settings.turnTimer ?? 30}s turn timer</span>

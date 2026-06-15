@@ -8,6 +8,7 @@ export type GameWinner = "CREWMATES" | "IMPOSTOR" | null;
 export interface RoomSettings {
   roomName: string;
   playerCount: 4 | 5 | 6 | 7 | 8;
+  impostorCount: 1 | 2 | 3;
   botDifficulty: BotDifficulty;
   meetingCooldown: 5 | 7 | 10;
   votingTimer: 30 | 60 | 90;
@@ -90,6 +91,7 @@ export interface GameSnapshot {
   };
   winner: GameWinner;
   impostorId?: string;
+  impostorIds?: string[];
 }
 
 export interface AuthPayload {
@@ -136,6 +138,7 @@ export type Ack<T> = (response: { ok: true; data: T } | { ok: false; error: stri
 export const DEFAULT_ROOM_SETTINGS: RoomSettings = {
   roomName: "Suspicious Sicilian",
   playerCount: 5,
+  impostorCount: 1,
   botDifficulty: 1500,
   meetingCooldown: 5,
   votingTimer: 60,

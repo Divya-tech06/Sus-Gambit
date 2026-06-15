@@ -18,6 +18,7 @@ export function CreateRoomPage() {
     const settings: RoomSettings = {
       roomName: String(form.get("roomName")),
       playerCount: Number(form.get("playerCount")) as RoomSettings["playerCount"],
+      impostorCount: Number(form.get("impostorCount")) as RoomSettings["impostorCount"],
       botDifficulty: Number(form.get("botDifficulty")) as unknown as RoomSettings["botDifficulty"],
       meetingCooldown: Number(form.get("meetingCooldown")) as RoomSettings["meetingCooldown"],
       votingTimer: Number(form.get("votingTimer")) as RoomSettings["votingTimer"],
@@ -42,6 +43,13 @@ export function CreateRoomPage() {
           {[4, 5, 6, 7, 8].map((count) => (
             <option key={count} value={count}>
               {count} Players
+            </option>
+          ))}
+        </SelectField>
+        <SelectField label="Impostor Count" name="impostorCount" defaultValue={DEFAULT_ROOM_SETTINGS.impostorCount}>
+          {[1, 2, 3].map((count) => (
+            <option key={count} value={count}>
+              {count} Impostor{count > 1 ? "s" : ""}
             </option>
           ))}
         </SelectField>

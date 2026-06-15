@@ -482,9 +482,13 @@ export function GamePage() {
           {game.status === "FINISHED" && (
             <Panel title={game.winner === "CREWMATES" ? "🎉 Crewmates Win!" : "💀 Impostor Wins!"}>
               <p className="text-zinc-300 mb-1">
-                Impostor:{" "}
+                {game.impostorIds && game.impostorIds.length > 1 ? "Impostors: " : "Impostor: "}
                 <span className="font-bold text-neon">
-                  {game.players.find((p) => p.id === game.impostorId)?.username ?? "Unknown"}
+                  {game.impostorIds && game.impostorIds.length > 0
+                    ? game.impostorIds
+                        .map((id) => game.players.find((p) => p.id === id)?.username ?? "Unknown")
+                        .join(", ")
+                    : game.players.find((p) => p.id === game.impostorId)?.username ?? "Unknown"}
                 </span>
               </p>
               <p className="text-xs text-zinc-500 mb-4">Returning to lobby in 10 seconds...</p>

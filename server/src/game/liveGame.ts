@@ -277,11 +277,14 @@ export class LiveGameService {
     if (!player) return;
 
     if (player.role === "IMPOSTOR") {
-      // Impostor left → crewmates win
       player.alive = false;
       player.connected = false;
-      this.sendSystemMessage(room, `${player.username} (Impostor) left the game. Crewmates win!`);
+      this.sendSystemMessage(room, `${player.username} (Impostor) left the game.`);
+      if (room.hostId === userId) {
+        this.reassignHost(room, userId);
+      }
       void this.checkGameEnd(room);
+      this.broadcastUpdate(room);
     } else {
       // Crewmate left → mark dead
       player.alive = false;
@@ -336,10 +339,21 @@ export class LiveGameService {
       whiteMovesSinceMeeting: 0
     };
 
-    const impostorId = room.turnOrder[Math.floor(Math.random() * room.turnOrder.length)]!;
+    const impCount = room.settings.impostorCount ?? 1;
+    if (impCount >= room.players.size) {
+      throw new Error("Impostor count must be less than the player count.");
+    }
+    if (impCount * 2 >= room.players.size) {
+      throw new Error("Impostor count must be less than half of the player count to start the game.");
+    }
+
+    const shuffledForImpostors = this.shuffle(room.turnOrder);
+    const impostorIds = shuffledForImpostors.slice(0, Math.min(impCount, shuffledForImpostors.length - 1));
+    const impostorIdsSet = new Set(impostorIds);
+
     for (const player of room.players.values()) {
       player.alive = true;
-      player.role = player.id === impostorId ? "IMPOSTOR" : "CREWMATE";
+      player.role = impostorIdsSet.has(player.id) ? "IMPOSTOR" : "CREWMATE";
       player.movesPlayed = 0;
       player.captures = 0;
       this.directEmit(player.id, "role-assigned", player.role);
@@ -348,7 +362,7 @@ export class LiveGameService {
     const game = await prisma.game.create({
       data: {
         roomId: room.id,
-        impostorId,
+        impostorId: impostorIds[0] ?? null,
         moveHistory: [],
         voteHistory: []
       }
@@ -626,12 +640,17 @@ export class LiveGameService {
 
   private async checkGameEnd(room: LiveRoom): Promise<boolean> {
     let winner: GameWinner = null;
-    const impostor = Array.from(room.players.values()).find((player) => player.role === "IMPOSTOR");
-    const alive = this.alivePlayers(room);
+    const players = Array.from(room.players.values());
+    const aliveImpostors = players.filter((player) => player.role === "IMPOSTOR" && player.alive);
+    const aliveCrewmates = players.filter((player) => player.role === "CREWMATE" && player.alive);
 
-    if (room.chess.isCheckmate()) winner = room.chess.turn() === "b" ? "CREWMATES" : "IMPOSTOR";
-    if (impostor && !impostor.alive) winner = "CREWMATES";
-    if (impostor?.alive && alive.length <= 2) winner = "IMPOSTOR";
+    if (room.chess.isCheckmate()) {
+      winner = room.chess.turn() === "b" ? "CREWMATES" : "IMPOSTOR";
+    } else if (aliveImpostors.length === 0) {
+      winner = "CREWMATES";
+    } else if (aliveImpostors.length >= aliveCrewmates.length) {
+      winner = "IMPOSTOR";
+    }
 
     if (!winner) return false;
 
@@ -815,7 +834,7 @@ export class LiveGameService {
 
   private gameSnapshot(room: LiveRoom): GameSnapshot {
     const currentPlayerId = this.currentPlayerId(room);
-    const impostor = Array.from(room.players.values()).find((player) => player.role === "IMPOSTOR");
+    const impostors = Array.from(room.players.values()).filter((player) => player.role === "IMPOSTOR");
     return {
       roomCode: room.roomCode,
       roomName: room.settings.roomName,
@@ -844,7 +863,8 @@ export class LiveGameService {
         available: this.meetingAvailable(room)
       },
       winner: room.winner,
-      impostorId: room.status === "FINISHED" ? impostor?.id : undefined
+      impostorId: room.status === "FINISHED" ? impostors[0]?.id : undefined,
+      impostorIds: room.status === "FINISHED" ? impostors.map(imp => imp.id) : undefined
     };
   }
 
