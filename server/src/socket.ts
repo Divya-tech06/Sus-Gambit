@@ -81,10 +81,10 @@ export function registerSockets(io: GameServer, liveGames: LiveGameService) {
     });
 
     socket.on("disband-room", ({ roomCode }, ack) => {
-      handle(socket, ack, () => {
+      handle(socket, ack, async () => {
         const code = validateRoomCode(roomCode);
+        await liveGames.disbandRoom(code, user.id);
         socket.leave(code);
-        return liveGames.disbandRoom(code, user.id);
       });
     });
 

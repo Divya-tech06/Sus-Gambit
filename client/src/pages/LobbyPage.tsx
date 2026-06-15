@@ -30,9 +30,12 @@ export function LobbyPage() {
 
   function handleDisband() {
     socket.emit("disband-room", { roomCode: roomCode! }, (res) => {
+      console.log("[Lobby] disband-room response:", res);
       if (res?.ok) {
         setRoom(null);
         navigate("/", { replace: true });
+      } else {
+        console.error("[Lobby] Failed to disband room:", res?.error);
       }
     });
   }
