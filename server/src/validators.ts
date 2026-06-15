@@ -32,6 +32,7 @@ export const profileSchema = z.object({
 export const createRoomSchema = z.object({
   roomName: z.string().trim().min(3).max(40),
   playerCount: z.union([z.literal(4), z.literal(5), z.literal(6), z.literal(7), z.literal(8)]),
+  impostorCount: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional().default(1),
   botDifficulty: z.number().min(1300).max(2700),
   meetingCooldown: z.union([z.literal(5), z.literal(7), z.literal(10)]),
   votingTimer: z.union([z.literal(30), z.literal(60), z.literal(90)]),
