@@ -49,20 +49,50 @@ export function AppShell() {
           Log out
         </button>
       </aside>
-      <main className="min-h-screen lg:pl-64">
+      <main className="min-h-screen lg:pl-64 pb-20 lg:pb-0">
         <header className="sticky top-0 z-20 flex items-center justify-between border-b border-white/10 bg-void/76 px-4 py-3 backdrop-blur lg:px-8">
           <div>
             <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Online</p>
             <p className="font-semibold">{user?.username}</p>
           </div>
-          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-neon/20 text-sm font-bold text-neon">
-            {user?.username.slice(0, 2).toUpperCase()}
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-md bg-neon/20 text-sm font-bold text-neon">
+              {user?.username.slice(0, 2).toUpperCase()}
+            </div>
+            <button
+              onClick={() => {
+                logout();
+                navigate("/login");
+              }}
+              title="Log out"
+              className="lg:hidden rounded-md border border-white/10 p-2 text-zinc-400 hover:bg-white/8 hover:text-white"
+            >
+              <LogOut size={16} />
+            </button>
           </div>
         </header>
         <div className="px-4 py-6 lg:px-8">
           <Outlet />
         </div>
       </main>
+
+      {/* Bottom navigation bar for mobile */}
+      <nav className="fixed bottom-0 left-0 right-0 z-30 flex justify-around border-t border-white/10 bg-void/90 py-2 backdrop-blur lg:hidden">
+        {links.map(({ to, label, icon: Icon }) => (
+          <NavLink
+            key={to}
+            to={to}
+            className={({ isActive }) =>
+              `flex flex-col items-center gap-1 px-3 py-1 text-[10px] transition ${
+                isActive ? "text-neon font-semibold" : "text-zinc-400 hover:text-zinc-200"
+              }`
+            }
+          >
+            <Icon size={20} />
+            <span>{label}</span>
+          </NavLink>
+        ))}
+      </nav>
     </div>
   );
 }

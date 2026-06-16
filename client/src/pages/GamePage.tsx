@@ -280,7 +280,7 @@ export function GamePage() {
 
       <div className="grid gap-4 md:grid-cols-12">
         {/* ── Left: Players ─────────────────────────────────────────────── */}
-        <div className="md:col-span-4 lg:col-span-3">
+        <div className="order-2 md:order-1 md:col-span-4 lg:col-span-3">
           <Panel title="Players">
             <div className={`role-flash mb-4 rounded-md border px-3 py-2 text-sm font-bold ${roleClass}`}>
               {role ? `You are ${role}` : "Role pending"}
@@ -334,7 +334,7 @@ export function GamePage() {
         </div>
 
         {/* ── Centre: Board ─────────────────────────────────────────────── */}
-        <section className="md:col-span-8 lg:col-span-9 xl:col-span-6 grid gap-4 content-start">
+        <section className="order-1 md:order-2 md:col-span-8 lg:col-span-9 xl:col-span-6 grid gap-4 content-start">
           {/* Header bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-white/10 bg-panel/82 p-4">
             <div>
@@ -515,7 +515,7 @@ export function GamePage() {
         </section>
 
         {/* ── Right: Move history (only, chat moved to overlay) ──────── */}
-        <div className="md:col-span-12 xl:col-span-3 grid gap-4 content-start">
+        <div className="order-3 md:col-span-12 xl:col-span-3 grid gap-4 content-start">
           <Panel title="Move History">
             <div className="thin-scrollbar max-h-80 overflow-auto text-sm">
               {moveRows.length === 0 && (
