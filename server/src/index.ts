@@ -11,6 +11,7 @@
   import { createLiveGameService, registerSockets } from "./socket.js";
 
   const app = express();
+  app.set("trust proxy", 1);
   const server = http.createServer(app);
   const io = new Server<ClientToServerEvents, ServerToClientEvents>(server, {
     cors: {
