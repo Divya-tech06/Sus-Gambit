@@ -142,6 +142,13 @@ export function GamePage() {
     ? "border-rose-500/60 bg-rose-500/10 text-rose-100"
     : "border-emerald-400/50 bg-emerald-400/10 text-emerald-100";
 
+  const isImpostor = useCallback((playerId: string) => {
+    if (game?.impostorIds) {
+      return game.impostorIds.includes(playerId);
+    }
+    return game?.impostorId === playerId;
+  }, [game?.impostorIds, game?.impostorId]);
+
   const moveRows = useMemo(() => [...(game?.moveHistory ?? [])].reverse().slice(0, 20), [game?.moveHistory]);
 
   // ── Timers ──────────────────────────────────────────────────────────────────
@@ -289,7 +296,7 @@ export function GamePage() {
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold truncate">{player.username}</span>
+                    <span className={`font-semibold truncate ${isImpostor(player.id) ? "text-rose-500 font-bold" : ""}`}>{player.username}</span>
                     {player.alive ? (
                       <div className="flex items-center gap-1.5 shrink-0">
                         {inMeeting && (
@@ -464,7 +471,9 @@ export function GamePage() {
                         onClick={() => socket.emit("cast-vote", { roomCode: roomCode!, targetId: p.id })}
                       >
                         <Vote size={16} />
-                        {p.username}
+                        <span className={isImpostor(p.id) ? "text-rose-500 font-bold" : ""}>
+                          {p.username}
+                        </span>
                       </button>
                     ))}
                   <button

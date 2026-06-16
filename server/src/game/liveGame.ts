@@ -181,7 +181,7 @@ export class LiveGameService {
       this.userToRoom.set(user.id, roomCode);
       this.broadcastUpdate(room);
       // Return appropriate snapshot
-      return room.status === "LOBBY" ? this.roomSnapshot(room) : this.gameSnapshot(room);
+      return room.status === "LOBBY" ? this.roomSnapshot(room) : this.gameSnapshot(room, user.id);
     }
 
     // New player joining
@@ -371,7 +371,7 @@ export class LiveGameService {
     room.gameId = game.id;
     this.startTurnTimer(room);
     this.broadcastUpdate(room);
-    return this.gameSnapshot(room);
+    return this.gameSnapshot(room, userId);
   }
 
   async makeMove(roomCode: string, userId: string, move: { from: string; to: string; promotion?: string }) {
@@ -392,7 +392,7 @@ export class LiveGameService {
     if (legalMove.captured) player.captures += 1;
     room.meeting.whiteMovesSinceMeeting += 1;
     await this.afterWhiteMove(room);
-    return this.gameSnapshot(room);
+    return this.gameSnapshot(room, userId);
   }
 
   sendMessage(roomCode: string, userId: string, body: string) {
@@ -446,7 +446,7 @@ export class LiveGameService {
     this.setMeetingTimer(room, () => this.startVoting(room));
     this.sendSystemMessage(room, `${player.username} called an emergency meeting!`);
     this.broadcastUpdate(room);
-    return this.gameSnapshot(room);
+    return this.gameSnapshot(room, userId);
   }
 
   castVote(roomCode: string, userId: string, targetId: string | "SKIP") {
@@ -463,7 +463,7 @@ export class LiveGameService {
     } else {
       this.broadcastUpdate(room);
     }
-    return this.gameSnapshot(room);
+    return this.gameSnapshot(room, userId);
   }
 
   snapshot(roomCode: string, userId: string) {
@@ -474,7 +474,7 @@ export class LiveGameService {
       player.disconnectedAt = null;
     }
     this.userToRoom.set(userId, roomCode);
-    return room.status === "LOBBY" ? this.roomSnapshot(room) : this.gameSnapshot(room);
+    return room.status === "LOBBY" ? this.roomSnapshot(room) : this.gameSnapshot(room, userId);
   }
 
   private removeUserFromCurrentRoom(userId: string) {
@@ -832,9 +832,12 @@ export class LiveGameService {
     };
   }
 
-  private gameSnapshot(room: LiveRoom): GameSnapshot {
+  private gameSnapshot(room: LiveRoom, recipientUserId?: string): GameSnapshot {
     const currentPlayerId = this.currentPlayerId(room);
     const impostors = Array.from(room.players.values()).filter((player) => player.role === "IMPOSTOR");
+    const isRecipientImpostor = recipientUserId
+      ? room.players.get(recipientUserId)?.role === "IMPOSTOR"
+      : false;
     return {
       roomCode: room.roomCode,
       roomName: room.settings.roomName,
@@ -863,17 +866,19 @@ export class LiveGameService {
         available: this.meetingAvailable(room)
       },
       winner: room.winner,
-      impostorId: room.status === "FINISHED" ? impostors[0]?.id : undefined,
-      impostorIds: room.status === "FINISHED" ? impostors.map(imp => imp.id) : undefined
+      impostorId: room.status === "FINISHED" || isRecipientImpostor ? impostors[0]?.id : undefined,
+      impostorIds: room.status === "FINISHED" || isRecipientImpostor ? impostors.map(imp => imp.id) : undefined
     };
   }
 
   private broadcastUpdate(room: LiveRoom) {
-    this.broadcast(
-      room.roomCode,
-      room.status === "LOBBY" ? "room-updated" : "game-updated",
-      room.status === "LOBBY" ? this.roomSnapshot(room) : this.gameSnapshot(room)
-    );
+    if (room.status === "LOBBY") {
+      this.broadcast(room.roomCode, "room-updated", this.roomSnapshot(room));
+    } else {
+      for (const player of room.players.values()) {
+        this.directEmit(player.id, "game-updated", this.gameSnapshot(room, player.id));
+      }
+    }
   }
 
   private requireRoom(roomCode: string) {
