@@ -4,6 +4,13 @@ import stockfish from "stockfish";
 
 let engine: any = null;
 let initPromise: Promise<any> | null = null;
+let shutdownTimer: NodeJS.Timeout | null = null;
+let activeSearches = 0;
+
+function decrementActiveSearches() {
+  activeSearches = Math.max(0, activeSearches - 1);
+  console.log(`[bot] activeSearches: ${activeSearches}`);
+}
 
 let bestmoveResolve: ((move: string | null) => void) | null = null;
 
@@ -113,16 +120,51 @@ async function runSearch(
   const TIMEOUT_MS = 4000;
   const moveTimeMs = Math.max(100, Math.min(800, (difficulty - 1300) * 25));
 
+  if (shutdownTimer) {
+    clearTimeout(shutdownTimer);
+    shutdownTimer = null;
+  }
+
+  activeSearches += 1;
+  console.log(`[bot] activeSearches: ${activeSearches}`);
+
   let eng: any;
   try {
     eng = await initEngine();
   } catch (err) {
     console.error("[bot] Stockfish init failed:", err);
+    decrementActiveSearches();
     return randomMove();
   }
 
+  const scheduleCleanup = () => {
+    if (shutdownTimer) clearTimeout(shutdownTimer);
+    shutdownTimer = setTimeout(() => {
+      if (activeSearches > 0) {
+        console.log("[bot] cleanup skipped: active search in progress");
+        return;
+      }
+      if (engine) {
+        console.log("[bot] engine shut down due to inactivity");
+        try {
+          engine.sendCommand("quit");
+        } catch (err) {
+          console.error("[bot] Error quitting Stockfish:", err);
+        }
+        engine = null;
+        initPromise = null;
+      }
+    }, 60000); // 60 seconds of inactivity
+  };
+
   return new Promise((resolve) => {
     let done = false;
+
+    const cleanupAndResolve = (result: any) => {
+      decrementActiveSearches();
+      resolve(result);
+      scheduleCleanup();
+    };
 
     const timer = setTimeout(() => {
       if (done) return;
@@ -130,7 +172,7 @@ async function runSearch(
       bestmoveResolve = null;
       console.warn("[bot] Stockfish timed out – falling back to random move");
       try { eng.sendCommand("stop"); } catch { /* ignore */ }
-      resolve(randomMove());
+      cleanupAndResolve(randomMove());
     }, TIMEOUT_MS);
 
     bestmoveResolve = (moveStr: string | null) => {
@@ -139,17 +181,18 @@ async function runSearch(
       clearTimeout(timer);
 
       if (!moveStr) {
-        resolve(randomMove());
+        cleanupAndResolve(randomMove());
         return;
       }
       const from = moveStr.substring(0, 2);
       const to = moveStr.substring(2, 4);
       const promotion = moveStr.length > 4 ? moveStr.substring(4, 5) : undefined;
-      resolve({ from, to, promotion });
+      cleanupAndResolve({ from, to, promotion });
     };
 
     try {
       eng.sendCommand("stop");                                          // cancel any leftover search
+      eng.sendCommand("setoption name Hash value 4");                  // limit Hash to 4MB to prevent memory growth
       eng.sendCommand("setoption name UCI_LimitStrength value true");
       eng.sendCommand(`setoption name UCI_Elo value ${difficulty}`);
       eng.sendCommand(`position fen ${chess.fen()}`);
@@ -161,7 +204,7 @@ async function runSearch(
       console.error("[bot] sendCommand error:", err);
       engine = null;
       initPromise = null;
-      resolve(randomMove());
+      cleanupAndResolve(randomMove());
     }
   });
 }
